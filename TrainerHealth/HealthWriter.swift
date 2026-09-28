@@ -16,7 +16,7 @@ enum HealthWriter {
                   let type = HKObjectType.quantityType(forIdentifier: .bodyMass) else { return nil }
             let sample = HKQuantitySample(
                 type: type,
-                quantity: HKQuantity(unit: .pound(), value: pounds),
+                quantity: HKQuantity(unit: .pound(), doubleValue: pounds),
                 start: event.occurredAt,
                 end: event.occurredAt
             )
@@ -30,7 +30,7 @@ enum HealthWriter {
             if let tier = event.proteinTier { metadata["protein_tier"] = tier }
             let sample = HKQuantitySample(
                 type: type,
-                quantity: HKQuantity(unit: .gram(), value: grams),
+                quantity: HKQuantity(unit: .gram(), doubleValue: grams),
                 start: event.occurredAt,
                 end: event.occurredAt,
                 metadata: metadata
@@ -55,7 +55,7 @@ enum HealthWriter {
                   let type = HKObjectType.quantityType(forIdentifier: .waistCircumference) else { return nil }
             let sample = HKQuantitySample(
                 type: type,
-                quantity: HKQuantity(unit: .meterUnit(with: .centi), value: cm),
+                quantity: HKQuantity(unit: .meterUnit(with: .centi), doubleValue: cm),
                 start: event.occurredAt,
                 end: event.occurredAt
             )
@@ -99,7 +99,7 @@ enum HealthWriter {
         }
         try await builder.endCollection(at: end)
         let finished = try await builder.finishWorkout()
-        return finished.uuid
+        return finished?.uuid
     }
 
     private static func severity(_ name: String?) -> HKCategoryValueSeverity {
