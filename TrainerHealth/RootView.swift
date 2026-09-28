@@ -293,10 +293,17 @@ struct DoctorView: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var scanning = false
 
     var body: some View {
         NavigationStack {
             Form {
+                Section("Setup code") {
+                    Button("Scan setup code") { scanning = true }
+                    Text("Or scan the ledger setup page with the Camera app. The address, token, and Telegram bot fill in here. You can still edit them.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 TextField("Ledger address", text: $model.baseURL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -310,6 +317,22 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: $scanning) {
+                ZStack(alignment: .topTrailing) {
+                    SetupScanner { code in
+                        scanning = false
+                        if SetupLink.apply(code: code) {
+                            model.reloadSettings()
+                            Task { await model.refresh() }
+                        } else {
+                            model.status = "That code is not a setup code."
+                        }
+                    }
+                    Button("Cancel") { scanning = false }
+                        .padding()
+                }
+                .ignoresSafeArea()
+            }
         }
     }
 }

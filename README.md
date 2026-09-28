@@ -2,7 +2,7 @@
 
 iPhone app for logging weigh-ins, workouts, and meals, copying stored rows into Apple Health, and building a doctor-visit prompt from Apple Health.
 
-The ledger address, token, and Telegram bot username are typed into the app on the phone. They are not in this repository. Shortcuts use the stored address. They do not take an address as a parameter.
+The ledger address, token, and Telegram bot username are typed into the app on the phone, or filled in by scanning a setup code from the ledger page. They are not in this repository. Shortcuts use the stored address. They do not take an address as a parameter. The Camera app opens this app when the code uses the `trainerhealth` link.
 
 An example address, not a real server, is `https://ledger.example`.
 

@@ -17,6 +17,7 @@ targets:
       - path: TrainerHealth
         excludes:
           - "**/*.entitlements"
+          - Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.ycross.trainer-health
@@ -24,7 +25,8 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Trainer Health
         INFOPLIST_KEY_NSHealthShareUsageDescription: Trainer Health reads Apple Health to build a doctor-visit summary and to avoid writing duplicate samples.
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: Trainer Health writes weight, workouts, protein, sleep, waist, and symptoms from your training log into Apple Health.
-        INFOPLIST_KEY_NSCameraUsageDescription: Trainer Health uses the camera to photograph a meal or a nutrition label.
+        INFOPLIST_KEY_NSCameraUsageDescription: Trainer Health uses the camera to photograph a meal or a nutrition label, and to scan a setup code.
+        INFOPLIST_FILE: TrainerHealth/Info.plist
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: Trainer Health uses a photo you choose of a meal or a nutrition label.
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO

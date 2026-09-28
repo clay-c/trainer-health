@@ -8,6 +8,11 @@ struct TrainerHealthApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(model)
+                .onOpenURL { url in
+                    guard SetupLink.apply(url) else { return }
+                    model.reloadSettings()
+                    Task { await model.refresh() }
+                }
         }
     }
 }
@@ -38,6 +43,13 @@ final class AppModel: ObservableObject {
             }
         }
         objectWillChange.send()
+    }
+
+    func reloadSettings() {
+        baseURL = AppSettings.baseURLString
+        token = AppSettings.token
+        botUsername = AppSettings.botUsername
+        status = "Setup saved from the code."
     }
 
     func saveSettings() {
