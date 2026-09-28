@@ -67,6 +67,7 @@ struct TodayView: View {
                     if !model.status.isEmpty { Text(model.status) }
                 }
             }
+            .dismissibleKeyboard()
             .navigationTitle("Today")
             .refreshable { await model.refresh() }
         }
@@ -105,6 +106,7 @@ struct MealView: View {
                 Button("Save meal") { Task { await save() } }
                 if !model.status.isEmpty { Text(model.status) }
             }
+            .dismissibleKeyboard()
             .navigationTitle("Meal")
             .sheet(item: $cameraTarget) { target in
                 CameraPicker { image in assign(image, to: target) }
@@ -209,6 +211,7 @@ struct WorkoutView: View {
                 }
                 if !model.status.isEmpty { Text(model.status) }
             }
+            .dismissibleKeyboard()
             .navigationTitle("Workout")
             .alert("Finish workout?", isPresented: $confirmFinish) {
                 Button("Finish") { Task { await finish() } }
@@ -368,6 +371,7 @@ struct DoctorView: View {
                     Button("Share") { share = true }
                 }
             }
+            .dismissibleKeyboard()
             .navigationTitle("Doctor visit")
             .sheet(isPresented: $share) {
                 ShareSheet(items: [prompt])
@@ -431,6 +435,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .dismissibleKeyboard()
             .navigationTitle("Settings")
             .alert("Remove extra Health entries?", isPresented: $confirmCleanup) {
                 Button("Remove extras", role: .destructive) {
@@ -469,6 +474,25 @@ struct SettingsView: View {
         } catch {
             cleanupMessage = error.localizedDescription
         }
+    }
+}
+
+private extension View {
+    func dismissibleKeyboard() -> some View {
+        scrollDismissesKeyboard(.interactively)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder),
+                            to: nil,
+                            from: nil,
+                            for: nil
+                        )
+                    }
+                }
+            }
     }
 }
 
