@@ -69,8 +69,8 @@ struct ShowTodayIntent: AppIntent {
 }
 
 struct SyncHealthIntent: AppIntent {
-    static var title: LocalizedStringResource = "Sync Apple Health"
-    static var description = IntentDescription("Copy stored ledger rows into Apple Health.")
+    static var title: LocalizedStringResource = "Sync Health"
+    static var description = IntentDescription("Copy stored ledger rows into Health.")
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let count = try await SyncService.syncHealth()
@@ -80,7 +80,7 @@ struct SyncHealthIntent: AppIntent {
 
 struct DoctorSummaryIntent: AppIntent {
     static var title: LocalizedStringResource = "Doctor summary prompt"
-    static var description = IntentDescription("Build a prompt from Apple Health for a date range.")
+    static var description = IntentDescription("Build a prompt from Health for a date range.")
 
     @Parameter(title: "From") var start: Date
     @Parameter(title: "Through") var end: Date
@@ -127,7 +127,7 @@ struct TrainerShortcuts: AppShortcutsProvider {
         )
         AppShortcut(
             intent: SyncHealthIntent(),
-            phrases: ["Sync \(.applicationName) to Apple Health"],
+            phrases: ["Sync \(.applicationName) to Health"],
             shortTitle: "Sync Health",
             systemImageName: "heart"
         )
