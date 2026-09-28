@@ -120,6 +120,17 @@ struct PendingEvents: Decodable {
     var events: [LedgerEvent]
 }
 
+struct PrescribedExercise: Codable, Equatable, Identifiable {
+    var name: String
+    var prescribed: String
+    var id: String { name }
+}
+
+struct TrainingPlan: Equatable {
+    var text: String
+    var exercises: [PrescribedExercise]
+}
+
 enum LedgerError: LocalizedError {
     case unreachable
     case badStatus(Int)
@@ -186,14 +197,22 @@ struct LedgerClient: Sendable {
         guard (200..<300).contains(http.statusCode) else { throw LedgerError.badStatus(http.statusCode) }
     }
 
-    func currentPlan() async throws -> String {
+    func currentPlan() async throws -> TrainingPlan {
         let data = try await send(path: "v1/plan/current", method: "GET", json: nil)
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        return object?["text"] as? String ?? ""
+        let text = object?["text"] as? String ?? ""
+        let rows = object?["exercises"] as? [[String: Any]] ?? []
+        let exercises = rows.compactMap { row -> PrescribedExercise? in
+            guard let name = row["name"] as? String, !name.isEmpty else { return nil }
+            return PrescribedExercise(name: name, prescribed: row["prescribed"] as? String ?? "")
+        }
+        return TrainingPlan(text: text, exercises: exercises)
     }
 
-    func sendNote(clientId: String, text: String) async throws -> String {
-        let data = try await send(path: "v1/notes", method: "POST", json: ["client_id": clientId, "text": text])
+    func sendNote(clientId: String, text: String, purpose: String = "") async throws -> String {
+        var body: [String: String] = ["client_id": clientId, "text": text]
+        if !purpose.isEmpty { body["purpose"] = purpose }
+        let data = try await send(path: "v1/notes", method: "POST", json: body)
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         return object?["id"] as? String ?? ""
     }

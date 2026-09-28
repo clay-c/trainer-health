@@ -155,9 +155,6 @@ enum HealthWriter {
         ] {
             if let type = HKObjectType.quantityType(forIdentifier: identifier) { types.insert(type) }
         }
-        if let pressure = HKCorrelationType.correlationType(forIdentifier: .bloodPressure) {
-            types.insert(pressure)
-        }
         return types
     }
 }

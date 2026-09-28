@@ -22,9 +22,12 @@ final class AppModel: ObservableObject {
     @Published var reachable = false
     @Published var status = ""
     @Published var planText = SyncService.cachedPlan()
+    @Published var planExercises = SyncService.cachedExercises()
     @Published var note = ""
     @Published var noteReply = ""
     @Published var noteBusy = false
+    @Published var planNoteReply = ""
+    @Published var planNoteBusy = false
     @Published var weightText = ""
     @Published var baseURL = AppSettings.baseURLString
     @Published var token = AppSettings.token
@@ -37,7 +40,10 @@ final class AppModel: ObservableObject {
         saveSettings()
         reachable = await SyncService.reachable()
         if reachable {
-            planText = (try? await SyncService.planText()) ?? planText
+            if let plan = try? await SyncService.currentPlan() {
+                planText = plan.text
+                planExercises = plan.exercises
+            }
             if pendingCount > 0 {
                 _ = try? await SyncService.flush()
             }
@@ -85,23 +91,46 @@ final class AppModel: ObservableObject {
     }
 
     func sendNote() async {
-        let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        await deliverNote(text: note, purpose: "", reply: \.noteReply, busy: \.noteBusy) {
+            note = ""
+        }
+    }
+
+    func sendPlanNote(_ text: String, clear: @escaping () -> Void, onReply: @escaping () -> Void) async {
+        await deliverNote(text: text, purpose: "plan", reply: \.planNoteReply, busy: \.planNoteBusy, clear: clear, onReply: onReply)
+    }
+
+    private func deliverNote(
+        text: String,
+        purpose: String,
+        reply replyKey: ReferenceWritableKeyPath<AppModel, String>,
+        busy busyKey: ReferenceWritableKeyPath<AppModel, Bool>,
+        clear: (() -> Void)? = nil,
+        onReply: (() -> Void)? = nil
+    ) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
         guard reachable, let client = try? SyncService.client() else {
             status = "The ledger is not reachable. Open Telegram instead."
             return
         }
-        noteBusy = true
-        noteReply = ""
-        defer { noteBusy = false }
+        self[keyPath: busyKey] = true
+        self[keyPath: replyKey] = ""
+        defer { self[keyPath: busyKey] = false }
         do {
-            let id = try await client.sendNote(clientId: UUID().uuidString, text: text)
+            let id = try await client.sendNote(clientId: UUID().uuidString, text: trimmed, purpose: purpose)
+            clear?()
             status = "Sent. The trainer often takes a minute or more."
             for _ in 0..<36 {
                 try await Task.sleep(nanoseconds: 5_000_000_000)
                 if let reply = try await client.noteReply(id: id), !reply.isEmpty {
-                    noteReply = reply
+                    self[keyPath: replyKey] = reply
+                    if let plan = try? await SyncService.currentPlan() {
+                        planText = plan.text
+                        planExercises = plan.exercises
+                    }
                     status = "Reply received."
+                    onReply?()
                     return
                 }
             }

@@ -33,13 +33,13 @@ struct RootView: View {
 
 struct TodayView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var planExpanded = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Plan") {
-                    Text(model.planText.isEmpty ? "No plan stored yet." : model.planText)
-                        .font(.body)
+                Section {
+                    CollapsibleMarkdown(title: "Plan", text: model.planText, expanded: $planExpanded)
                 }
                 Section("Weigh-in") {
                     TextField("Pounds", text: $model.weightText)
@@ -53,7 +53,7 @@ struct TodayView: View {
                     }
                     .disabled(model.noteBusy)
                     if !model.noteReply.isEmpty {
-                        Text(model.noteReply)
+                        MarkdownText(text: model.noteReply)
                     }
                     if let url = AppSettings.telegramURL() {
                         Link("Open in Telegram", destination: url)
@@ -159,94 +159,185 @@ struct MealView: View {
 
 struct WorkoutView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var name = ""
-    @State private var prescribed = ""
-    @State private var load = ""
-    @State private var reps = ""
-    @State private var rir = ""
-    @State private var exercises: [[String: Any]] = []
-    @State private var duration = "45"
-    @State private var location = "gym"
+    @State private var planExpanded = false
+    @State private var started = false
+    @State private var rows: [SessionExercise] = []
+    @State private var change = ""
+    @State private var confirmFinish = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Prescribed") {
-                    Text(model.planText.isEmpty ? "No plan stored yet." : model.planText)
+                Section {
+                    CollapsibleMarkdown(title: "Prescribed", text: model.planText, expanded: $planExpanded)
                 }
-                Section("Performed set") {
-                    TextField("Exercise", text: $name)
-                    TextField("Prescribed load or note", text: $prescribed)
-                    TextField("Load you used, pounds", text: $load).keyboardType(.decimalPad)
-                    TextField("Reps you did", text: $reps).keyboardType(.numberPad)
-                    TextField("Reps in reserve", text: $rir).keyboardType(.decimalPad)
-                    Button("Add set") { addSet() }
+                if !started {
+                    Section {
+                        Button("Begin workout") { begin() }
+                            .disabled(model.planExercises.isEmpty)
+                        if model.planExercises.isEmpty {
+                            Text("This plan has no exercises yet. Tell the trainer what you want to do.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
-                Section("This session") {
-                    if exercises.isEmpty {
-                        Text("No performed sets yet.")
-                    } else {
-                        ForEach(Array(exercises.enumerated()), id: \.offset) { _, exercise in
-                            VStack(alignment: .leading) {
-                                Text(exercise["name"] as? String ?? "Set").font(.headline)
-                                Text("Prescribed: \(exercise["prescribed"] as? String ?? "")")
-                                    .foregroundStyle(.secondary)
-                                Text(performedLine(exercise))
+                Section("Change the plan") {
+                    TextField("No gym, bodyweight only", text: $change, axis: .vertical)
+                    Button(model.planNoteBusy ? "Waiting for the trainer…" : "Send") {
+                        let text = change
+                        Task {
+                            await model.sendPlanNote(text, clear: { change = "" }) {
+                                if !started { rows = [] }
                             }
                         }
                     }
-                    TextField("Minutes", text: $duration).keyboardType(.numberPad)
-                    TextField("Location", text: $location)
-                    Button("Save workout") { Task { await save() } }
+                    .disabled(model.planNoteBusy)
+                    if !model.planNoteReply.isEmpty {
+                        MarkdownText(text: model.planNoteReply)
+                    }
+                }
+                if started {
+                    Section("Exercises") {
+                        ForEach($rows) { $row in
+                            ExerciseRow(row: $row)
+                        }
+                    }
+                    Section {
+                        Button("Finish workout") { confirmFinish = true }
+                    }
                 }
                 if !model.status.isEmpty { Text(model.status) }
             }
             .navigationTitle("Workout")
+            .alert("Finish workout?", isPresented: $confirmFinish) {
+                Button("Finish") { Task { await finish() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(finishMessage)
+            }
         }
     }
 
-    private func addSet() {
-        guard !name.isEmpty, let reps = Int(reps) else { return }
-        var set: [String: Any] = ["reps": reps]
-        if let rir = Double(rir) { set["rir"] = rir }
-        var exercise: [String: Any] = [
-            "name": name,
-            "prescribed": prescribed,
-            "sets": [set],
-        ]
-        if let load = Double(load) { exercise["load_lb"] = load }
-        exercises.append(exercise)
-        self.reps = ""
-        self.rir = ""
+    private var finishMessage: String {
+        let open = rows.filter { $0.mark == .pending }.count
+        if open == 0 { return "Save this session." }
+        return "\(open) still unmarked will be saved as skipped."
     }
 
-    private func performedLine(_ exercise: [String: Any]) -> String {
-        let load = exercise["load_lb"] as? Double
-        let sets = exercise["sets"] as? [[String: Any]] ?? []
-        let reps = sets.first?["reps"] as? Int
-        let rir = sets.first?["rir"] as? Double
-        let loadText = load.map { "\($0) lb" } ?? "bodyweight"
-        let rirText = rir.map { ", \($0) in reserve" } ?? ""
-        return "Performed: \(loadText) × \(reps.map(String.init) ?? "?")\(rirText)"
+    private func begin() {
+        planExpanded = false
+        started = true
+        rows = model.planExercises.map {
+            SessionExercise(name: $0.name, prescribed: $0.prescribed)
+        }
     }
 
-    private func save() async {
-        guard !exercises.isEmpty else {
-            model.status = "Add at least one set."
-            return
+    private func finish() async {
+        for index in rows.indices where rows[index].mark == .pending {
+            rows[index].mark = .skipped
+        }
+        var performed: [[String: Any]] = []
+        var skipped: [String] = []
+        for row in rows {
+            if row.mark == .skipped {
+                skipped.append(row.name)
+                continue
+            }
+            var set: [String: Any] = ["reps": Int(row.reps) ?? 0]
+            if let rir = Double(row.rir) { set["rir"] = rir }
+            var exercise: [String: Any] = [
+                "name": row.name,
+                "prescribed": row.prescribed,
+                "sets": [set],
+            ]
+            if let load = Double(row.load) { exercise["load_lb"] = load }
+            performed.append(exercise)
         }
         do {
             try await SyncService.saveWorkout(
-                exercises: exercises,
-                durationMin: Double(duration) ?? 45,
-                location: location,
-                prescribedText: model.planText
+                exercises: performed,
+                durationMin: 45,
+                location: "unspecified",
+                prescribedText: model.planText,
+                skipped: skipped
             )
-            exercises = []
+            started = false
+            rows = []
             await model.refresh()
             model.status = model.reachable ? "Workout saved." : "Workout is waiting on this phone."
         } catch {
             model.status = error.localizedDescription
+        }
+    }
+}
+
+private struct SessionExercise: Identifiable {
+    let id = UUID()
+    var name: String
+    var prescribed: String
+    var mark: Mark = .pending
+    var load = ""
+    var reps = ""
+    var rir = ""
+    var open = false
+
+    enum Mark {
+        case pending, done, skipped
+    }
+}
+
+private struct ExerciseRow: View {
+    @Binding var row: SessionExercise
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                row.open.toggle()
+            } label: {
+                HStack {
+                    Text(row.name)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Circle()
+                        .fill(color)
+                        .frame(width: 14, height: 14)
+                }
+            }
+            .buttonStyle(.plain)
+            if row.open {
+                if !row.prescribed.isEmpty {
+                    Text(row.prescribed)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                TextField("Load, pounds", text: $row.load)
+                    .keyboardType(.decimalPad)
+                TextField("Reps", text: $row.reps)
+                    .keyboardType(.numberPad)
+                TextField("Reps in reserve", text: $row.rir)
+                    .keyboardType(.decimalPad)
+                HStack {
+                    Button("Complete") {
+                        row.mark = .done
+                        row.open = false
+                    }
+                    .disabled(Int(row.reps) == nil)
+                    Button("Skip") {
+                        row.mark = .skipped
+                        row.open = false
+                    }
+                }
+            }
+        }
+        .listRowBackground(color.opacity(0.22))
+    }
+
+    private var color: Color {
+        switch row.mark {
+        case .pending: .yellow
+        case .done: .green
+        case .skipped: .red
         }
     }
 }

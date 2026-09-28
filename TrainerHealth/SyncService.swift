@@ -30,7 +30,8 @@ enum SyncService {
         exercises: [[String: Any]],
         durationMin: Double,
         location: String,
-        prescribedText: String = ""
+        prescribedText: String = "",
+        skipped: [String] = []
     ) async throws {
         let body: [String: Any] = [
             "kind": "workout",
@@ -41,6 +42,7 @@ enum SyncService {
                 "location": location,
                 "prescribed": prescribedText,
                 "exercises": exercises,
+                "skipped": skipped,
             ],
         ]
         try await enqueueOrSend(kind: "workout", json: body, plate: nil, label: nil)
@@ -119,14 +121,28 @@ enum SyncService {
 
     @MainActor
     static func planText() async throws -> String {
+        try await currentPlan().text
+    }
+
+    @MainActor
+    static func currentPlan() async throws -> TrainingPlan {
         guard let client = try? client(), await client.health() else { throw LedgerError.unreachable }
-        let text = try await client.currentPlan()
-        UserDefaults.standard.set(text, forKey: "cachedPlanText")
-        return text
+        let plan = try await client.currentPlan()
+        UserDefaults.standard.set(plan.text, forKey: "cachedPlanText")
+        if let data = try? JSONEncoder().encode(plan.exercises) {
+            UserDefaults.standard.set(data, forKey: "cachedPlanExercises")
+        }
+        return plan
     }
 
     static func cachedPlan() -> String {
         UserDefaults.standard.string(forKey: "cachedPlanText") ?? ""
+    }
+
+    static func cachedExercises() -> [PrescribedExercise] {
+        guard let data = UserDefaults.standard.data(forKey: "cachedPlanExercises"),
+              let rows = try? JSONDecoder().decode([PrescribedExercise].self, from: data) else { return [] }
+        return rows
     }
 
     @MainActor
