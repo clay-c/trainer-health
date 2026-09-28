@@ -356,7 +356,15 @@ struct DoctorView: View {
                 DatePicker("Through", selection: $end, displayedComponents: .date)
                 Button("Build summary prompt") { Task { await build() } }
                 if !prompt.isEmpty {
-                    Text(prompt).font(.footnote)
+                    Text(verbatim: prompt)
+                        .font(.footnote)
+                        .lineLimit(18)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Share sends the full prompt.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Button("Share") { share = true }
                 }
             }

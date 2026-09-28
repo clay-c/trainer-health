@@ -8,7 +8,7 @@ enum DoctorSummary {
         let weights = try await quantities(.bodyMass, unit: .pound(), from: start, to: end, store: store)
         let protein = try await quantities(.dietaryProtein, unit: .gram(), from: start, to: end, store: store)
         let waist = try await quantities(.waistCircumference, unit: .meterUnit(with: .centi), from: start, to: end, store: store)
-        let heart = try await quantities(.heartRate, unit: HKUnit.count().unitDivided(by: .minute()), from: start, to: end, store: store)
+        let heart = try await heartRateLines(from: start, to: end, store: store)
         let steps = try await stepTotal(from: start, to: end, store: store)
         let pressure = try await bloodPressure(from: start, to: end, store: store)
         let sleep = try await sleepHours(from: start, to: end, store: store)
@@ -35,7 +35,7 @@ enum DoctorSummary {
             "Blood pressure:",
             pressure.isEmpty ? "- none" : pressure,
             "",
-            "Heart rate:",
+            "Heart rate (beats per minute, daily low / average / high):",
             heart.isEmpty ? "- none" : heart,
             "",
             "Steps in the window: \(steps.map { String(Int($0)) } ?? "not available")",
@@ -123,18 +123,52 @@ enum DoctorSummary {
     private static func sleepHours(from start: Date, to end: Date, store: HKHealthStore) async throws -> String {
         guard let type = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return "" }
         let rows = try await samples(type: type, from: start, to: end, store: store)
-        return rows.compactMap { sample -> String? in
-            guard let category = sample as? HKCategorySample else { return nil }
-            let asleep: Set<Int> = [
-                HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
-                HKCategoryValueSleepAnalysis.asleepCore.rawValue,
-                HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
-                HKCategoryValueSleepAnalysis.asleepREM.rawValue,
-            ]
-            guard asleep.contains(category.value) else { return nil }
-            let hours = category.endDate.timeIntervalSince(category.startDate) / 3600
-            return "- \(day(category.startDate)) \(String(format: "%.2f", hours))"
-        }.joined(separator: "\n")
+        let asleep: Set<Int> = [
+            HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
+            HKCategoryValueSleepAnalysis.asleepCore.rawValue,
+            HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
+            HKCategoryValueSleepAnalysis.asleepREM.rawValue,
+        ]
+        var totals: [String: Double] = [:]
+        var order: [String] = []
+        for sample in rows {
+            guard let category = sample as? HKCategorySample, asleep.contains(category.value) else { continue }
+            let key = day(category.startDate)
+            if totals[key] == nil { order.append(key) }
+            totals[key, default: 0] += category.endDate.timeIntervalSince(category.startDate) / 3600
+        }
+        return order.map { "- \($0) \(String(format: "%.1f", totals[$0] ?? 0))" }.joined(separator: "\n")
+    }
+
+    private static func heartRateLines(from start: Date, to end: Date, store: HKHealthStore) async throws -> String {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .heartRate) else { return "" }
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKStatisticsCollectionQuery(
+                quantityType: type,
+                quantitySamplePredicate: HKQuery.predicateForSamples(withStart: start, end: end),
+                options: [.discreteAverage, .discreteMin, .discreteMax],
+                anchorDate: Calendar.current.startOfDay(for: start),
+                intervalComponents: DateComponents(day: 1)
+            )
+            query.initialResultsHandler = { _, results, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                var lines: [String] = []
+                results?.enumerateStatistics(from: start, to: end) { statistics, _ in
+                    guard let average = statistics.averageQuantity()?.doubleValue(for: unit),
+                          let low = statistics.minimumQuantity()?.doubleValue(for: unit),
+                          let high = statistics.maximumQuantity()?.doubleValue(for: unit) else { return }
+                    lines.append(
+                        "- \(day(statistics.startDate)) low \(Int(low.rounded())) avg \(Int(average.rounded())) high \(Int(high.rounded()))"
+                    )
+                }
+                continuation.resume(returning: lines.joined(separator: "\n"))
+            }
+            store.execute(query)
+        }
     }
 
     private static func workoutLines(from start: Date, to end: Date, store: HKHealthStore) async throws -> String {
