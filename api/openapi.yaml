@@ -1,0 +1,37 @@
+openapi: 3.0.3
+info:
+  title: Trainer ledger
+  version: "1"
+  description: |
+    Append-only facts. This document has no server URL. The phone stores the base URL locally.
+servers: []
+paths:
+  /healthz:
+    get:
+      responses:
+        "200":
+          description: Ledger is reachable
+  /v1/facts:
+    post:
+      summary: Insert a structured fact. Repeating client_id returns the original row.
+  /v1/meals:
+    post:
+      summary: Multipart meal. Fields text, occurred_at, client_id. Files plate and label.
+  /v1/plan/current:
+    get:
+      summary: Latest plan text
+  /v1/notes:
+    post:
+      summary: Send a free-form note. Not queued when the ledger is unreachable.
+  /v1/notes/{id}:
+    get:
+      summary: Note plus reply, if the trainer has answered
+  /v1/exports/pending:
+    get:
+      summary: Stored rows not yet copied to Apple Health
+  /v1/exports:
+    post:
+      summary: Receipts after a HealthKit write. Each receipt has event_id, channel, and healthkit_uuid.
+  /v1/doses:
+    get:
+      summary: Dose rows between start and end, used only to enrich a doctor summary
