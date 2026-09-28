@@ -393,6 +393,9 @@ struct DoctorView: View {
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var scanning = false
+    @State private var confirmCleanup = false
+    @State private var cleaning = false
+    @State private var cleanupMessage = ""
 
     var body: some View {
         NavigationStack {
@@ -414,8 +417,29 @@ struct SettingsView: View {
                 Text("The address stays on this phone. It is not part of the app source.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                Section("Apple Health") {
+                    Button(cleaning ? "Looking for extra entries…" : "Remove duplicate Health entries") {
+                        confirmCleanup = true
+                    }
+                    .disabled(cleaning)
+                    Text("Finds repeated weights, meals, sleep, symptoms, and workouts this app wrote, and deletes the extras. A matching entry from another app is left in place.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if !cleanupMessage.isEmpty {
+                        Text(cleanupMessage)
+                            .font(.footnote)
+                    }
+                }
             }
             .navigationTitle("Settings")
+            .alert("Remove extra Health entries?", isPresented: $confirmCleanup) {
+                Button("Remove extras", role: .destructive) {
+                    Task { await removeDuplicateHealthEntries() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("One copy of each repeated value stays. Entries from other apps are not deleted.")
+            }
             .sheet(isPresented: $scanning) {
                 ZStack(alignment: .topTrailing) {
                     SetupScanner { code in
@@ -432,6 +456,18 @@ struct SettingsView: View {
                 }
                 .ignoresSafeArea()
             }
+        }
+    }
+
+    private func removeDuplicateHealthEntries() async {
+        cleaning = true
+        defer { cleaning = false }
+        do {
+            try await HealthWriter.requestAccess()
+            let removed = try await HealthWriter.removeDuplicates()
+            cleanupMessage = removed == 0 ? "No extra entries." : "Removed \(removed) extra \(removed == 1 ? "entry" : "entries")."
+        } catch {
+            cleanupMessage = error.localizedDescription
         }
     }
 }
