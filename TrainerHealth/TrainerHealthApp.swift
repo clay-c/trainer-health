@@ -92,7 +92,7 @@ final class AppModel: ObservableObject {
 
     func sendNote() async {
         await deliverNote(text: note, purpose: "", reply: \.noteReply, busy: \.noteBusy) {
-            note = ""
+            self.note = ""
         }
     }
 
