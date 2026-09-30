@@ -1,6 +1,11 @@
 import Foundation
 import HealthKit
 
+struct HealthWrite {
+    var uuid: UUID
+    var created: Bool
+}
+
 enum HealthWriter {
     static let store = HKHealthStore()
 
@@ -9,9 +14,9 @@ enum HealthWriter {
         try await store.requestAuthorization(toShare: shareTypes, read: readTypes)
     }
 
-    static func write(_ event: LedgerEvent) async throws -> UUID? {
+    static func write(_ event: LedgerEvent) async throws -> HealthWrite? {
         if let existing = try await existingMatch(event) {
-            return existing
+            return HealthWrite(uuid: existing, created: false)
         }
         switch event.kind {
         case "body_mass":
@@ -24,7 +29,7 @@ enum HealthWriter {
                 end: event.occurredAt
             )
             try await store.save(sample)
-            return sample.uuid
+            return HealthWrite(uuid: sample.uuid, created: true)
         case "dietary_protein":
             guard let grams = event.proteinG,
                   let type = HKObjectType.quantityType(forIdentifier: .dietaryProtein) else { return nil }
@@ -39,7 +44,7 @@ enum HealthWriter {
                 metadata: metadata
             )
             try await store.save(sample)
-            return sample.uuid
+            return HealthWrite(uuid: sample.uuid, created: true)
         case "sleep":
             guard let hours = event.sleepH,
                   let type = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return nil }
@@ -52,7 +57,7 @@ enum HealthWriter {
                 end: end
             )
             try await store.save(sample)
-            return sample.uuid
+            return HealthWrite(uuid: sample.uuid, created: true)
         case "waist":
             guard let cm = event.waistCm,
                   let type = HKObjectType.quantityType(forIdentifier: .waistCircumference) else { return nil }
@@ -63,7 +68,7 @@ enum HealthWriter {
                 end: event.occurredAt
             )
             try await store.save(sample)
-            return sample.uuid
+            return HealthWrite(uuid: sample.uuid, created: true)
         case "symptom":
             guard let name = event.symptom, let identifier = symptomIdentifier(name),
                   let type = HKObjectType.categoryType(forIdentifier: identifier) else { return nil }
@@ -74,7 +79,7 @@ enum HealthWriter {
                 end: event.occurredAt
             )
             try await store.save(sample)
-            return sample.uuid
+            return HealthWrite(uuid: sample.uuid, created: true)
         case "workout":
             return try await writeWorkout(event)
         default:
@@ -82,7 +87,7 @@ enum HealthWriter {
         }
     }
 
-    private static func writeWorkout(_ event: LedgerEvent) async throws -> UUID? {
+    private static func writeWorkout(_ event: LedgerEvent) async throws -> HealthWrite? {
         let workout = event.workout
         let minutes = workout?.durationMin ?? 30
         let end = event.occurredAt
@@ -96,13 +101,19 @@ enum HealthWriter {
             let load = exercise.loadLb.map { " \($0) lb" } ?? ""
             return "\(exercise.name)\(load) x\(sets)"
         }.joined(separator: "; ")
-        try await builder.beginCollection(at: start)
-        if !summary.isEmpty {
-            try await builder.addMetadata(["trainer_exercises": String(summary.prefix(500))])
+        var metadata: [String: Any] = ["ledger_fact_id": event.id.uuidString]
+        if workout?.durationEstimated == true {
+            metadata["duration_estimated"] = true
         }
+        if !summary.isEmpty {
+            metadata["trainer_exercises"] = String(summary.prefix(500))
+        }
+        try await builder.beginCollection(at: start)
+        try await builder.addMetadata(metadata)
         try await builder.endCollection(at: end)
         let finished = try await builder.finishWorkout()
-        return finished?.uuid
+        guard let uuid = finished?.uuid else { return nil }
+        return HealthWrite(uuid: uuid, created: true)
     }
 
     private static func severity(_ name: String?) -> HKCategoryValueSeverity {
@@ -163,6 +174,9 @@ enum HealthWriter {
         }
         extras += copiesToDelete(among: try await allSamples(type: HKObjectType.workoutType())) { sample in
             guard let workout = sample as? HKWorkout else { return nil }
+            if let fact = workout.metadata?["ledger_fact_id"] as? String, !fact.isEmpty {
+                return "fact|\(fact)"
+            }
             let minutes = Int((workout.duration / 60).rounded())
             return "\(dayKey(workout.endDate))|\(workout.workoutActivityType.rawValue)|\(minutes)"
         }
@@ -199,13 +213,10 @@ enum HealthWriter {
                 dayKey(category.startDate) == dayKey(event.occurredAt) && category.value == wanted
             }?.uuid
         case "workout":
-            let minutes = Int((event.workout?.durationMin ?? 30).rounded())
+            let fact = event.id.uuidString
             let rows = try await samples(type: HKObjectType.workoutType(), around: event.occurredAt)
             return rows.compactMap { $0 as? HKWorkout }.first { workout in
-                let recorded = Int((workout.duration / 60).rounded())
-                return workout.workoutActivityType == .traditionalStrengthTraining
-                    && dayKey(workout.endDate) == dayKey(event.occurredAt)
-                    && recorded == minutes
+                workout.metadata?["ledger_fact_id"] as? String == fact
             }?.uuid
         default:
             return nil

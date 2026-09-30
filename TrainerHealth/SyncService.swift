@@ -1,5 +1,25 @@
 import Foundation
 
+struct HealthSyncResult {
+    var copied: Int
+    var alreadyThere: Int
+
+    var summary: String {
+        if copied == 0 && alreadyThere == 0 {
+            return "Nothing new to copy."
+        }
+        var parts: [String] = []
+        if copied > 0 {
+            parts.append("Copied \(copied) to Health.")
+        }
+        if alreadyThere > 0 {
+            let verb = alreadyThere == 1 ? "was" : "were"
+            parts.append("\(alreadyThere) \(verb) already in Health.")
+        }
+        return parts.joined(separator: " ")
+    }
+}
+
 enum SyncService {
     static func client() throws -> LedgerClient {
         guard let url = AppSettings.normalizedBaseURL(), !AppSettings.token.isEmpty else {
@@ -96,27 +116,46 @@ enum SyncService {
     }
 
     @MainActor
-    static func syncHealth() async throws -> Int {
+    static func syncHealth() async throws -> HealthSyncResult {
         guard let client = try? client(), await client.health() else { throw LedgerError.unreachable }
         _ = try await flush()
         try await HealthWriter.requestAccess()
         let events = try await client.pendingEvents()
         var receipts: [[String: String]] = []
+        var copied = 0
+        var alreadyThere = 0
         for event in events {
-            guard let uuid = try await HealthWriter.write(event) else { continue }
+            guard let written = try await HealthWriter.write(event) else { continue }
+            if written.created {
+                copied += 1
+            } else {
+                alreadyThere += 1
+            }
             let ids = event.alsoIds ?? [event.id]
             for id in ids {
                 receipts.append([
                     "event_id": id.uuidString,
                     "channel": event.channel,
-                    "healthkit_uuid": uuid.uuidString,
+                    "healthkit_uuid": written.uuid.uuidString,
                 ])
             }
         }
         if !receipts.isEmpty {
             try await client.postReceipts(receipts)
         }
-        return events.count
+        return HealthSyncResult(copied: copied, alreadyThere: alreadyThere)
+    }
+
+    @MainActor
+    static func todayWeight() async throws -> Double? {
+        let start = Calendar.current.startOfDay(for: Date())
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start
+        return try await client().weighIn(from: start, to: end)
+    }
+
+    @MainActor
+    static func exportHistory() async throws -> [HealthExport] {
+        try await client().exports()
     }
 
     @MainActor

@@ -42,9 +42,22 @@ struct TodayView: View {
                     CollapsibleMarkdown(title: "Plan", text: model.planText, expanded: $planExpanded)
                 }
                 Section("Weigh-in") {
-                    TextField("Pounds", text: $model.weightText)
-                        .keyboardType(.decimalPad)
-                    Button("Save weight") { Task { await model.logWeight() } }
+                    if let pounds = model.todayWeight, !model.editingWeight {
+                        Text("Today's weight is already recorded, \(pounds.formatted()) lb.")
+                        Button("Log a different weight") { model.editingWeight = true }
+                    } else {
+                        TextField("Pounds", text: $model.weightText)
+                            .keyboardType(.decimalPad)
+                        Button(model.weightBusy ? "Saving weight…" : "Save weight") {
+                            Task { await model.logWeight() }
+                        }
+                        .disabled(model.weightBusy)
+                    }
+                    if !model.weightMessage.isEmpty {
+                        Text(model.weightMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("Trainer") {
                     TextField("Note", text: $model.note, axis: .vertical)
@@ -63,8 +76,13 @@ struct TodayView: View {
                     }
                 }
                 Section {
-                    Button("Sync Apple Health") { Task { await model.syncHealth() } }
-                    if !model.status.isEmpty { Text(model.status) }
+                    Button(model.syncBusy ? "Syncing…" : "Sync Apple Health") {
+                        Task { await model.syncHealth() }
+                    }
+                    .disabled(model.syncBusy)
+                    if !model.syncMessage.isEmpty {
+                        Text(model.syncMessage)
+                    }
                 }
             }
             .dismissibleKeyboard()
@@ -81,6 +99,8 @@ struct MealView: View {
     @State private var labelImage: UIImage?
     @State private var cameraTarget: PhotoTarget?
     @State private var libraryTarget: PhotoTarget?
+    @State private var mealBusy = false
+    @State private var mealMessage = ""
 
     enum PhotoTarget: Identifiable, Equatable {
         case plate, label
@@ -103,8 +123,9 @@ struct MealView: View {
                     Button("Camera") { openCamera(.label) }
                     Button("Library") { libraryTarget = .label }
                 }
-                Button("Save meal") { Task { await save() } }
-                if !model.status.isEmpty { Text(model.status) }
+                Button(mealBusy ? "Saving meal…" : "Save meal") { Task { await save() } }
+                    .disabled(mealBusy)
+                if !mealMessage.isEmpty { Text(mealMessage) }
             }
             .dismissibleKeyboard()
             .navigationTitle("Meal")
@@ -139,9 +160,11 @@ struct MealView: View {
     private func save() async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || plate != nil || labelImage != nil else {
-            model.status = "Add a photo or a few words."
+            mealMessage = "Add a photo or a few words."
             return
         }
+        mealBusy = true
+        defer { mealBusy = false }
         do {
             try await SyncService.saveMeal(
                 text: trimmed,
@@ -152,9 +175,9 @@ struct MealView: View {
             plate = nil
             labelImage = nil
             await model.refresh()
-            model.status = model.reachable ? "Meal saved. The trainer will read it." : "Meal is waiting on this phone."
+            mealMessage = model.reachable ? "Meal saved. The trainer will read it." : "Meal is waiting on this phone."
         } catch {
-            model.status = error.localizedDescription
+            mealMessage = error.localizedDescription
         }
     }
 }
@@ -166,6 +189,8 @@ struct WorkoutView: View {
     @State private var rows: [SessionExercise] = []
     @State private var change = ""
     @State private var confirmFinish = false
+    @State private var workoutBusy = false
+    @State private var workoutMessage = ""
 
     var body: some View {
         NavigationStack {
@@ -206,8 +231,12 @@ struct WorkoutView: View {
                         }
                     }
                     Section {
-                        Button("Finish workout") { confirmFinish = true }
+                        Button(workoutBusy ? "Saving workout…" : "Finish workout") { confirmFinish = true }
+                            .disabled(workoutBusy)
                     }
+                }
+                if !workoutMessage.isEmpty {
+                    Text(workoutMessage)
                 }
                 if !model.status.isEmpty { Text(model.status) }
             }
@@ -257,6 +286,8 @@ struct WorkoutView: View {
             if let load = Double(row.load) { exercise["load_lb"] = load }
             performed.append(exercise)
         }
+        workoutBusy = true
+        defer { workoutBusy = false }
         do {
             try await SyncService.saveWorkout(
                 exercises: performed,
@@ -268,9 +299,9 @@ struct WorkoutView: View {
             started = false
             rows = []
             await model.refresh()
-            model.status = model.reachable ? "Workout saved." : "Workout is waiting on this phone."
+            workoutMessage = model.reachable ? "Workout saved." : "Workout is waiting on this phone."
         } catch {
-            model.status = error.localizedDescription
+            workoutMessage = error.localizedDescription
         }
     }
 }
@@ -422,6 +453,19 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Section("Apple Health") {
+                    if model.exports.isEmpty {
+                        Text("Nothing copied to Health yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(model.exports) { row in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.label)
+                                Text("\(row.occurredAt.formatted(date: .abbreviated, time: .omitted)) · copied \(row.exportedAt.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                     Button(cleaning ? "Looking for extra entries…" : "Remove duplicate Health entries") {
                         confirmCleanup = true
                     }

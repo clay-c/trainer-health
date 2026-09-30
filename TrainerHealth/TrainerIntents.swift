@@ -73,8 +73,8 @@ struct SyncHealthIntent: AppIntent {
     static var description = IntentDescription("Copy stored ledger rows into Health.")
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let count = try await SyncService.syncHealth()
-        return .result(dialog: "Looked at \(count) stored rows.")
+        let result = try await SyncService.syncHealth()
+        return .result(dialog: "\(result.summary)")
     }
 }
 

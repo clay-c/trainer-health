@@ -100,6 +100,7 @@ struct LedgerEvent: Decodable, Identifiable {
 
     struct WorkoutBody: Decodable {
         var durationMin: Double?
+        var durationEstimated: Bool?
         var location: String?
         var exercises: [Exercise]
     }
@@ -118,6 +119,18 @@ struct LedgerEvent: Decodable, Identifiable {
 
 struct PendingEvents: Decodable {
     var events: [LedgerEvent]
+}
+
+struct HealthExport: Decodable, Identifiable {
+    var id: UUID
+    var exportedAt: Date
+    var occurredAt: Date
+    var channel: String
+    var label: String
+}
+
+struct ExportList: Decodable {
+    var exports: [HealthExport]
 }
 
 struct PrescribedExercise: Codable, Equatable, Identifiable {
@@ -225,6 +238,34 @@ struct LedgerClient: Sendable {
 
     func pendingEvents() async throws -> [LedgerEvent] {
         let data = try await send(path: "v1/exports/pending", method: "GET", json: nil)
+        return try Self.decoder().decode(PendingEvents.self, from: data).events
+    }
+
+    func exports() async throws -> [HealthExport] {
+        let data = try await send(path: "v1/exports", method: "GET", json: nil)
+        return try Self.decoder().decode(ExportList.self, from: data).exports
+    }
+
+    func weighIn(from start: Date, to end: Date) async throws -> Double? {
+        var parts = URLComponents(url: baseURL.appending(path: "v1/weigh-in"), resolvingAgainstBaseURL: false)
+        parts?.queryItems = [
+            URLQueryItem(name: "start", value: ISO8601Flex.string(from: start)),
+            URLQueryItem(name: "end", value: ISO8601Flex.string(from: end)),
+        ]
+        guard let url = parts?.url else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw LedgerError.unreachable }
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        if let number = object?["weight_lb"] as? NSNumber {
+            return number.doubleValue
+        }
+        return nil
+    }
+
+    private static func decoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         decoder.dateDecodingStrategy = .custom { decoder in
@@ -235,7 +276,7 @@ struct LedgerClient: Sendable {
             }
             return date
         }
-        return try decoder.decode(PendingEvents.self, from: data).events
+        return decoder
     }
 
     func postReceipts(_ receipts: [[String: String]]) async throws {

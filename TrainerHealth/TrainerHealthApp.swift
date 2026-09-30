@@ -29,6 +29,13 @@ final class AppModel: ObservableObject {
     @Published var planNoteReply = ""
     @Published var planNoteBusy = false
     @Published var weightText = ""
+    @Published var todayWeight: Double?
+    @Published var editingWeight = false
+    @Published var weightBusy = false
+    @Published var weightMessage = ""
+    @Published var syncBusy = false
+    @Published var syncMessage = ""
+    @Published var exports: [HealthExport] = []
     @Published var baseURL = AppSettings.baseURLString
     @Published var token = AppSettings.token
     @Published var botUsername = AppSettings.botUsername
@@ -43,6 +50,15 @@ final class AppModel: ObservableObject {
             if let plan = try? await SyncService.currentPlan() {
                 planText = plan.text
                 planExercises = plan.exercises
+            }
+            if let pounds = try? await SyncService.todayWeight() {
+                todayWeight = pounds
+                if pounds != nil {
+                    editingWeight = false
+                }
+            }
+            if let history = try? await SyncService.exportHistory() {
+                exports = history
             }
             if pendingCount > 0 {
                 _ = try? await SyncService.flush()
@@ -66,26 +82,30 @@ final class AppModel: ObservableObject {
 
     func logWeight() async {
         guard let pounds = Double(weightText) else {
-            status = "Enter a weight in pounds."
+            weightMessage = "Enter a weight in pounds."
             return
         }
+        weightBusy = true
+        defer { weightBusy = false }
         do {
             try await SyncService.saveWeight(pounds: pounds)
             weightText = ""
             await refresh()
-            status = reachable ? "Weight saved." : "Weight is waiting on this phone."
+            weightMessage = reachable ? "Weight saved." : "Weight is waiting on this phone."
         } catch {
-            status = error.localizedDescription
+            weightMessage = error.localizedDescription
         }
     }
 
     func syncHealth() async {
+        syncBusy = true
+        defer { syncBusy = false }
         do {
-            let count = try await SyncService.syncHealth()
+            let result = try await SyncService.syncHealth()
             await refresh()
-            status = "Health sync looked at \(count) stored rows."
+            syncMessage = result.summary
         } catch {
-            status = error.localizedDescription
+            syncMessage = error.localizedDescription
             reachable = false
         }
     }
