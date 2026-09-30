@@ -227,7 +227,7 @@ struct WorkoutView: View {
                 if started {
                     Section("Exercises") {
                         ForEach($rows) { $row in
-                            ExerciseRow(row: $row)
+                            ExerciseRow(row: $row, planText: model.planText)
                         }
                     }
                     Section {
@@ -323,6 +323,8 @@ private struct SessionExercise: Identifiable {
 
 private struct ExerciseRow: View {
     @Binding var row: SessionExercise
+    var planText: String
+    @State private var instructionsExpanded = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -340,10 +342,8 @@ private struct ExerciseRow: View {
             }
             .buttonStyle(.plain)
             if row.open {
-                if !row.prescribed.isEmpty {
-                    Text(row.prescribed)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                if !instruction.isEmpty {
+                    CollapsibleMarkdown(title: "Instructions", text: instruction, expanded: $instructionsExpanded)
                 }
                 TextField("Load, pounds", text: $row.load)
                     .keyboardType(.decimalPad)
@@ -365,6 +365,21 @@ private struct ExerciseRow: View {
             }
         }
         .listRowBackground(color.opacity(0.22))
+    }
+
+    private var instruction: String {
+        let name = row.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let numbered = planText.components(separatedBy: "\n").first { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.range(of: #"^\d+\.\s+"#, options: .regularExpression) != nil else { return false }
+            return trimmed.localizedCaseInsensitiveContains(name)
+        }
+        if let numbered {
+            return numbered
+                .trimmingCharacters(in: .whitespaces)
+                .replacingOccurrences(of: #"^\d+\.\s+"#, with: "", options: .regularExpression)
+        }
+        return row.prescribed.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var color: Color {
